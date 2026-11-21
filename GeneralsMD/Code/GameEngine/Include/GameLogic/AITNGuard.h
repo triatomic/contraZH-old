@@ -77,6 +77,8 @@ public:
 // FORWARD DECLARATIONS ///////////////////////////////////////////////////////
 
 //--------------------------------------------------------------------------------------
+class TunnelContain;
+
 class AITNGuardMachine : public StateMachine
 {
 	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE( AITNGuardMachine, "AITNGuardMachinePool" );
@@ -84,7 +86,13 @@ class AITNGuardMachine : public StateMachine
 private:
 	Coord3D									m_positionToGuard;
 	ObjectID								m_nemesisToAttack;
+	TunnelContain* prepareDeployment(UnsignedInt now, Coord3D& start, Coord3D& end);
 	GuardMode								m_guardMode;
+	Real m_leashRadius;
+	Real m_detectionRadius;
+	UnsignedInt m_outsideUntil;
+	UnsignedInt m_outsideDuration;
+	UnsignedInt m_redeployAt;
 
 protected:
 	// snapshot interface
@@ -108,7 +116,26 @@ public:
 	GuardMode getGuardMode() const { return m_guardMode; }
 	void setGuardMode(GuardMode guardMode) { m_guardMode = guardMode; }
 
-	Bool lookForInnerTarget();
+	Bool deployGuards();
+	Real getLeashRadius() const { return m_leashRadius; }
+	Real getDetectionRadius() const { return m_detectionRadius; }
+	Bool canFightFrom(const Coord3D& from, Object* target);
+	Bool isPathWithinLeash(Path* path) const;
+	Bool isDeployed() const { return m_outsideDuration != 0; }
+	Bool shouldReturnAfterClear(UnsignedInt now, Bool hasThreats)
+	{
+		if (hasThreats)
+		{
+			m_outsideUntil = 0;
+			return false;
+		}
+		if (!m_outsideUntil)
+		{
+			m_outsideUntil = now + m_outsideDuration;
+		}
+		return now >= m_outsideUntil;
+	}
+	void onReturned();
 
 	static Real getStdGuardRange(const Object* obj);
 };

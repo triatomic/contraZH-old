@@ -1358,6 +1358,51 @@ void OpenContain::exitObjectViaDoor( Object *exitObj, ExitDoorType exitDoor )
 		TheAI->pathfinder()->addObjectToPathfindMap( exitObj );
 	}
 }
+Bool OpenContain::getGuardExitPosition(Coord3D& position, Coord3D* startPosition, Bool forceFallback) const
+{
+	const Int numberExits = getOpenContainModuleData()->m_numberOfExitPaths;
+	if (numberExits < 1)
+	{
+		return false;
+	}
+
+	AsciiString startBone("ExitStart");
+	AsciiString endBone("ExitEnd");
+	if (numberExits > 1)
+	{
+		startBone.format("ExitStart%02d", m_whichExitPath);
+		endBone.format("ExitEnd%02d", m_whichExitPath);
+	}
+	const Object* tunnel = getObject();
+	Coord3D start;
+	const Bool hasStart = tunnel->getSingleLogicalBonePosition(startBone.str(), &start, nullptr);
+	const Bool hasEnd = tunnel->getSingleLogicalBonePosition(endBone.str(), &position, nullptr);
+	const Real radius = tunnel->getGeometryInfo().getBoundingCircleRadius();
+	const Real dx = position.x - tunnel->getPosition()->x;
+	const Real dy = position.y - tunnel->getPosition()->y;
+	const Bool useFallback = forceFallback || !hasEnd || (isTunnelContain() && dx * dx + dy * dy < radius * radius);
+	if (useFallback)
+	{
+		if (!isTunnelContain())
+		{
+			return false;
+		}
+
+		const Real distance = radius + 2 * PATHFIND_CELL_SIZE_F;
+		const Real angle = tunnel->getOrientation();
+		position = *tunnel->getPosition();
+		position.x += Cos(angle) * distance;
+		position.y += Sin(angle) * distance;
+		position.z = TheTerrainLogic->getGroundHeight(position.x, position.y);
+	}
+
+	if (startPosition)
+	{
+		*startPosition = hasStart && !useFallback ? start : *tunnel->getPosition();
+	}
+	return true;
+}
+
 // ------------------------------------------------------------------------------------------------
 /**
 	This call is used to evacuate units from a tunnel network via a persistent state (guard tunnel networ).
@@ -1366,7 +1411,18 @@ void OpenContain::exitObjectViaDoor( Object *exitObj, ExitDoorType exitDoor )
 */
 void OpenContain::exitObjectInAHurry( Object *exitObj )
 {
-	removeFromContain( exitObj );
+	Coord3D startPosition;
+	Coord3D endPosition;
+	if (!getGuardExitPosition(endPosition, &startPosition))
+	{
+		return;
+	}
+	exitGuard(exitObj, startPosition, endPosition);
+}
+
+void OpenContain::exitGuard(Object* exitObj, const Coord3D& startPosition, const Coord3D& endPosition)
+{
+	removeFromContain(exitObj);
 
 	Object *me = getObject();
 
@@ -1380,34 +1436,13 @@ void OpenContain::exitObjectInAHurry( Object *exitObj )
 		me->clearAndSetModelConditionState( MODELCONDITION_DOOR_1_CLOSING, MODELCONDITION_DOOR_1_OPENING );
 	}
 
-	Int numberExits = getOpenContainModuleData()->m_numberOfExitPaths;
-	if( numberExits > 0 )
+	const Int numberExits = getOpenContainModuleData()->m_numberOfExitPaths;
 	{
-		// We have ExitStart/End specified in art to use when we kick people out.  If >1, then
-		// we have many and we need to decide which one to use.
-		AsciiString startBone("ExitStart");
-		AsciiString endBone("ExitEnd");
-		Coord3D startPosition;
-		Coord3D endPosition;
-		if( numberExits > 1 )
+		if (numberExits > 1)
 		{
-			char suffix[8];
-			itoa(m_whichExitPath, suffix, 10);
-			if( m_whichExitPath < 10 )
-			{
-				startBone.concat('0');
-				endBone.concat('0');
-			}
-
-			m_whichExitPath = (m_whichExitPath % numberExits) + 1;// To cycle from 1 to n
-
-			startBone.concat(suffix);
-			endBone.concat(suffix);
+			m_whichExitPath = (m_whichExitPath % numberExits) + 1;
 		}
-		me->getSingleLogicalBonePosition( startBone.str(), &startPosition, nullptr );
-		me->getSingleLogicalBonePosition( endBone.str(), &endPosition, nullptr );
 
-		//startPosition.x = startPosition.y = 0;
 		Real exitAngle = me->getOrientation();
 		exitObj->setPosition( &startPosition );
 		exitObj->setOrientation( exitAngle );
@@ -1428,15 +1463,10 @@ void OpenContain::exitObjectInAHurry( Object *exitObj )
 				TheAI->pathfinder()->updateGoal(me, me->getPosition(), TheTerrainLogic->getLayerForDestination(me->getPosition()));
 			}
 			ai->ignoreObstacle(nullptr);
-			TheAI->pathfinder()->adjustToPossibleDestination(exitObj, ai->getLocomotorSet(), &endPosition);
 			// The units often come out at the same position, and need to ignore collisions briefly
 			// as they move out.  jba.
 			ai->setIgnoreCollisionTime(computeExitIgnoreCollisionFrames(exitObj, ai, startPosition, endPosition));
 			ai->startExitPass(&startPosition, &endPosition);	// TheSuperHackers @feature simonx645 16/11/2026 "exitpass"
-		}
-		exitPath.push_back(endPosition);
-		if (m_rallyPointExists) {
-			exitPath.push_back(m_rallyPoint);
 		}
 
 		if( ai )
@@ -1445,12 +1475,6 @@ void OpenContain::exitObjectInAHurry( Object *exitObj )
 
 			TheAI->pathfinder()->updateGoal(exitObj, &endPosition, TheTerrainLogic->getLayerForDestination(&endPosition));
 		}
-	}
-	else
-	{
-		///< @todo This really should be automatically wrapped up in an activation sequence	for objects in general
-		// tell the AI about it
-		TheAI->pathfinder()->addObjectToPathfindMap( exitObj );
 	}
 }
 

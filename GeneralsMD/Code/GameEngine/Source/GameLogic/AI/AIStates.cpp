@@ -1042,7 +1042,7 @@ const Coord3D *AIStateMachine::getGoalPathPosition( Int i ) const
 
 const PathPointInfo *AIStateMachine::getPathPointInfo(Int i) const
 {
-	if (i < 0 || i >= m_goalPath.size())
+	if (i < 0 || i >= m_goalPathInfo.size())
 		return nullptr;
 
 	return &m_goalPathInfo[i];
@@ -1161,6 +1161,17 @@ AIGuardMachine* AIStateMachine::getGuardMachine(void)
 	}
 
 	return NULL;
+}
+
+//----------------------------------------------------------------------------------------------------------
+AITNGuardMachine* AIStateMachine::getTunnelGuardMachine()
+{
+	if (getCurrentStateID() != AI_GUARD_TUNNEL_NETWORK)
+	{
+		return nullptr;
+	}
+	AITunnelNetworkGuardState* guardState = static_cast<AITunnelNetworkGuardState*>(internalGetState(AI_GUARD_TUNNEL_NETWORK));
+	return guardState->getTunnelGuardMachine();
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -3559,7 +3570,7 @@ StateReturnType AIFollowPathState::onEnter()
  	const Coord3D *nextPos = ai->friend_getGoalPathPosition( m_index+1 );
 	m_adjustFinal = true;
 
-	if (ppi->m_isReverse)
+	if (ppi && ppi->m_isReverse)
 		ai->friend_setForcedMoveBackwards(true);
 	else
 		ai->friend_setForcedMoveBackwards(false);
@@ -3633,6 +3644,11 @@ void AIFollowPathState::onExit( StateExitType status )
 //----------------------------------------------------------------------------------------------------------
 StateReturnType AIFollowPathState::update()
 {
+	if (!getMachineOwner()->getAI()->friend_getGoalPathPosition(m_index))
+	{
+		return STATE_SUCCESS;
+	}
+
 	getMachine()->setGoalPosition(&m_goalPosition);
 	// do movement
 	StateReturnType status = AIInternalMoveToState::update();
@@ -3647,8 +3663,11 @@ StateReturnType AIFollowPathState::update()
 			m_retryCount--;
 		}	else {
 			ppi = ai->friend_getPathPointInfo(m_index);
-			if (ppi->m_cmdNodeID == obj->getCurrentCommand() && ppi->m_cmdNodeID != obj->getLastCommandInMoveStreak())
+			if (ppi && ppi->m_cmdNodeID != 0 && ppi->m_cmdNodeID == obj->getCurrentCommand() &&
+				ppi->m_cmdNodeID != obj->getLastCommandInMoveStreak())
+			{
 				TheCommandSequence->removeCurrentCommand(obj);
+			}
 			++m_index;
 		}
 		const Coord3D *pos = ai->friend_getGoalPathPosition( m_index );
@@ -3663,8 +3682,11 @@ StateReturnType AIFollowPathState::update()
 			}
 			if (tooClose) {
 				ppi = ai->friend_getPathPointInfo(m_index);
-				if (ppi->m_cmdNodeID == obj->getCurrentCommand() && ppi->m_cmdNodeID != obj->getLastCommandInMoveStreak())
+				if (ppi && ppi->m_cmdNodeID != 0 && ppi->m_cmdNodeID == obj->getCurrentCommand() &&
+					ppi->m_cmdNodeID != obj->getLastCommandInMoveStreak())
+				{
 					TheCommandSequence->removeCurrentCommand(obj);
+				}
 				m_index++;
 				pos = ai->friend_getGoalPathPosition(m_index);
 			}
@@ -7858,7 +7880,7 @@ StateReturnType AITunnelNetworkGuardState::onEnter()
 	// now that essential parameters are set, set the machine's initial state
 	if (m_guardMachine->initDefaultState() == STATE_FAILURE)
 		return STATE_FAILURE;
-	return m_guardMachine->setState(AI_GUARD_RETURN);
+	return STATE_CONTINUE;
 }
 
 //----------------------------------------------------------------------------------------------------------
